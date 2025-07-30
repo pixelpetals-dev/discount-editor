@@ -3,7 +3,7 @@
 client_id = "9a8f5469ad3ec62a21aec6a8e1c45b99"
 name = "discount-on-segment"
 handle = "discount-on-segment"
-application_url = "https://discount-editor-ankn08l2q-pixelpetals-devs-projects.vercel.app"
+application_url = "https://discount-editor-3fhghgxuv-pixelpetals-devs-projects.vercel.app/"
 embedded = true
 
 [build]
@@ -27,9 +27,9 @@ scopes = "read_customers,write_draft_orders,write_products"
 
 [auth]
 redirect_urls = [
-  "https://discount-editor-ankn08l2q-pixelpetals-devs-projects.vercel.app/auth/callback", 
-  "https://discount-editor-ankn08l2q-pixelpetals-devs-projects.vercel.app/auth/shopify/callback", 
-  "https://discount-editor-ankn08l2q-pixelpetals-devs-projects.vercel.app/api/auth/callback"
+  "https://discount-editor-3fhghgxuv-pixelpetals-devs-projects.vercel.app/auth/callback", 
+  "https://discount-editor-3fhghgxuv-pixelpetals-devs-projects.vercel.app/auth/shopify/callback", 
+  "https://discount-editor-3fhghgxuv-pixelpetals-devs-projects.vercel.app/api/auth/callback"
 ]
 
 [pos]
