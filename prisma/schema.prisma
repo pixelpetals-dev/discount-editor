@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+model DiscountPlan {
+  id         String   @id @default(uuid())
+  name       String
+  targetType String
+  targetKey  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  rules      Rule[]
+}
+
+model Rule {
+  id             String       @id @default(uuid())
+  categoryId     String
+  percentOff     Float
+  discountPlanId String
+  discountPlan   DiscountPlan @relation(fields: [discountPlanId], references: [id], onDelete: Cascade)
+}
+
+model Customer {
+  id       String            @id
+  email    String?
+  segments CustomerSegment[]
+}
+
+model Segment {
+  id        String            @id
+  customers CustomerSegment[]
+}
+
+model CustomerSegment {
+  customerId String
+  segmentId  String
+  segment    Segment  @relation(fields: [segmentId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@id([customerId, segmentId])
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}

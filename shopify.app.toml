@@ -1,0 +1,36 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "9a8f5469ad3ec62a21aec6a8e1c45b99"
+name = "discount-on-segment"
+handle = "discount-on-segment"
+application_url = "https://shopify-go0upucxn-haidelimdi-gmailcoms-projects.vercel.app"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2024-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,write_draft_orders,write_products"
+
+[auth]
+redirect_urls = [
+  "https://shopify-go0upucxn-haidelimdi-gmailcoms-projects.vercel.app/auth/callback", 
+  "https://shopify-go0upucxn-haidelimdi-gmailcoms-projects.vercel.app/auth/shopify/callback", 
+  "https://shopify-go0upucxn-haidelimdi-gmailcoms-projects.vercel.app/api/auth/callback"
+]
+
+[pos]
+embedded = false
