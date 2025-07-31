@@ -10,6 +10,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   
   try {
+    const { admin } = await authenticate.admin(request);
+    console.log("Authentication successful");
     const plans = await prisma.discountPlan.findMany({
       include: { rules: true },
       orderBy: { createdAt: "desc" },
@@ -20,7 +22,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let segments: Array<{id: string, name: string, query: string}> = [];
     let collections = [];
     try {
+      console.log("Starting to fetch collections and segments...");
+      
       // Fetch collections
+      console.log("Fetching collections...");
       const collectionsResponse = await admin.graphql(`#graphql
         query {
           collections(first: 100) {
@@ -38,16 +43,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       `);
       const collectionsData = await collectionsResponse.json();
+      console.log("Collections response:", collectionsData);
+      
       if ((collectionsData as any).errors) {
-        throw new Error(`GraphQL errors: ${JSON.stringify((collectionsData as any).errors)}`);
+        console.error("Collections GraphQL errors:", (collectionsData as any).errors);
+        throw new Error(`Collections GraphQL errors: ${JSON.stringify((collectionsData as any).errors)}`);
       }
+      
       collections = collectionsData.data.collections.edges.map((edge: any) => ({
         id: edge.node.id,
         title: edge.node.title,
         productsCount: edge.node.productsCount.count,
         description: edge.node.description,
       }));
+      console.log("Collections processed:", collections.length);
+      
       // Fetch segments
+      console.log("Fetching segments...");
       const segmentsResponse = await admin.graphql(`#graphql
         query getSegments($first: Int!) {
           segments(first: $first) {
@@ -63,23 +75,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       `, { variables: { first: 50 } });
       const segmentsData = await segmentsResponse.json();
+      console.log("Segments response:", segmentsData);
+      
       if ((segmentsData as any).errors) {
-        throw new Error(`GraphQL errors: ${JSON.stringify((segmentsData as any).errors)}`);
+        console.error("Segments GraphQL errors:", (segmentsData as any).errors);
+        throw new Error(`Segments GraphQL errors: ${JSON.stringify((segmentsData as any).errors)}`);
       }
+      
       segments = segmentsData.data.segments.edges.map((edge: any) => edge.node);
+      console.log("Segments processed:", segments.length);
+      
     } catch (error) {
       console.error('Error fetching collections or segments:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       collections = [];
       segments = [];
     }
     return json({ plans, segments, collections });
   } catch (error) {
-    console.error('Error loading data:', error);
+    console.error('Detailed error in loader:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
     return json({ 
       plans: [], 
       segments: [], 
       collections: [],
-      error: 'Failed to load data from Shopify'
+      error: `Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`
     });
   }
 };

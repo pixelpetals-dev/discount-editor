@@ -7,38 +7,10 @@ datasource db {
   url      = env("POSTGRES_URL")
 }
 
-model DiscountPlan {
-  id         String   @id @default(uuid())
-  name       String
-  targetType String
-  targetKey  String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  rules      Rule[]
-
-  @@index([targetType, targetKey])
-}
-
-model Rule {
-  id             String       @id @default(uuid())
-  categoryId     String
-  percentOff     Float
-  discountPlanId String
-  discountPlan   DiscountPlan @relation(fields: [discountPlanId], references: [id], onDelete: Cascade)
-
-  @@index([categoryId])
-  @@index([discountPlanId])
-}
-
 model Customer {
-  id       String            @id
-  email    String?
-  segments CustomerSegment[]
-}
-
-model Segment {
-  id        String            @id
-  customers CustomerSegment[]
+  id              String            @id
+  email           String?
+  customerSegments CustomerSegment[]
 }
 
 model CustomerSegment {
@@ -48,6 +20,34 @@ model CustomerSegment {
   segment    Segment  @relation(fields: [segmentId], references: [id])
 
   @@id([customerId, segmentId])
+}
+
+model DiscountPlan {
+  id         String   @id
+  name       String
+  targetType String
+  targetKey  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  rules      Rule[]
+
+  @@index([targetType, targetKey])
+}
+
+model Rule {
+  id             String       @id
+  categoryId     String
+  percentOff     Float
+  discountPlanId String
+  discountPlan   DiscountPlan @relation(fields: [discountPlanId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@index([discountPlanId])
+}
+
+model Segment {
+  id              String            @id
+  customerSegments CustomerSegment[]
 }
 
 model Session {
@@ -69,4 +69,5 @@ model Session {
 
   @@index([expires])
   @@index([shop])
+  @@map("session")  // Add this line to map to lowercase table
 }
