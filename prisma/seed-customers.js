@@ -37,6 +37,7 @@ async function main() {
   const data = await resp.json();
   console.log('Granted scopes:', data);
 
+
   // Try a simple REST API call to confirm token access
   const respRest = await fetch(`https://${shop}/admin/api/2023-10/customers.json?fields=id,email,tags`, {
     headers: { 'X-Shopify-Access-Token': accessToken }

@@ -1,10 +1,14 @@
-export function addCorsHeaders(response: Response): Response {
+export function addCorsHeaders(response: Response, request?: Request): Response {
   const newResponse = new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers: new Headers(response.headers),
   });
-  newResponse.headers.set("Access-Control-Allow-Origin", "*");
+  
+  // Get the origin from the request headers
+  const origin = request?.headers.get("origin") || "*";
+  
+  newResponse.headers.set("Access-Control-Allow-Origin", origin);
   newResponse.headers.set(
     "Access-Control-Allow-Methods",
     "GET, POST, PUT, DELETE, OPTIONS",
@@ -30,10 +34,13 @@ export function addCorsHeaders(response: Response): Response {
 
 export function handleCorsPreflight(request: Request): Response | null {
   if (request.method === "OPTIONS") {
+    // Get the origin from the request headers
+    const origin = request.headers.get("origin") || "*";
+    
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
           "Content-Type, Authorization, ngrok-skip-browser-warning, X-Requested-With",

@@ -132,19 +132,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
+    // Create the discount plan first
     const plan = await prisma.discountPlan.create({
       data: {
+        id: `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name,
         targetType,
         targetKey,
-        rules: {
-          create: rules,
-        },
+        updatedAt: new Date(),
       },
+    });
+
+    // Then create the rules
+    const createdRules = await Promise.all(
+      rules.map((rule: any) =>
+        prisma.rule.create({
+          data: {
+            id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            categoryId: rule.categoryId,
+            percentOff: rule.percentOff,
+            discountPlanId: plan.id,
+          },
+        })
+      )
+    );
+
+    // Fetch the plan with rules
+    const planWithRules = await prisma.discountPlan.findUnique({
+      where: { id: plan.id },
       include: { rules: true },
     });
 
-    return json({ success: "Plan created successfully", plan });
+    return json({ success: "Plan created successfully", plan: planWithRules });
   }
 
   if (action === "delete") {

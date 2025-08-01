@@ -45,12 +45,14 @@ export default defineConfig({
       'd151084bce39.ngrok-free.app', // Current ngrok domain
       'carbiforce.shop', // Your new Shopify store domain
       'qvk2k1-kq.myshopify.com', // Your new myshopify domain
+      '8785c124df66.ngrok-free.app'
     ],
     cors: {
       origin: [
         'https://qvk2k1-kq.myshopify.com', // Your new myshopify domain
         'https://carbiforce.shop', // Your new store domain
         'https://d151084bce39.ngrok-free.app', // Current ngrok domain
+        'https://8785c124df66.ngrok-free.app'
       ],
       credentials: true,
       methods: ['GET', 'POST', 'OPTIONS'],
