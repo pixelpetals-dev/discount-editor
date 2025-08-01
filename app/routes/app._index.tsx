@@ -1,108 +1,93 @@
-import { json } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, Form, useSubmit, useActionData, Link } from "@remix-run/react";
+import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
+import { useLoaderData, useActionData, useNavigation, useSubmit } from "@remix-run/react";
 import { useState, useEffect } from "react";
-import { Page, Card, Button, BlockStack, Text, Layout, InlineStack, TextField, Select, Banner, Spinner } from "@shopify/polaris";
-import { prisma } from "../db.server";
 import { authenticate } from "../shopify.server";
+import { prisma } from "../db.server";
+import {
+  Page,
+  Layout,
+  Card,
+  Button,
+  TextField,
+  Select,
+  BlockStack,
+  InlineStack,
+  Banner,
+  Spinner,
+  Text,
+} from "@shopify/polaris";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  
+
   try {
-    const { admin } = await authenticate.admin(request);
-    console.log("Authentication successful");
+    // Fetch collections and segments from Shopify
+    const collectionsQuery = `#graphql
+      query getCollections {
+        collections(first: 100) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `;
+
+    const collectionsResponse = await admin.graphql(collectionsQuery);
+    const collectionsData = await collectionsResponse.json();
+
+    const collections = collectionsData.data.collections.edges.map((edge: any) => ({
+      id: edge.node.id,
+      title: edge.node.title,
+      handle: edge.node.handle,
+    }));
+
+    const segmentsQuery = `#graphql
+      query getSegments {
+        segments(first: 50) {
+          edges {
+            node {
+              id
+              name
+            }
+          }
+        }
+      }
+    `;
+
+    const segmentsResponse = await admin.graphql(segmentsQuery);
+    const segmentsData = await segmentsResponse.json();
+
+    const segments = segmentsData.data.segments.edges.map((edge: any) => ({
+      id: edge.node.id,
+      name: edge.node.name,
+    }));
+
+    // Fetch existing discount plans
     const plans = await prisma.discountPlan.findMany({
-      include: { rules: true },
-      orderBy: { createdAt: "desc" },
+      include: {
+        rules: true,
+      },
     });
 
-    // Use collections as segments since customer data requires approval
-    // Fetch real segments from Shopify
-    let segments: Array<{id: string, name: string, query: string}> = [];
-    let collections = [];
-    try {
-      console.log("Starting to fetch collections and segments...");
-      
-      // Fetch collections
-      console.log("Fetching collections...");
-      const collectionsResponse = await admin.graphql(`#graphql
-        query {
-          collections(first: 100) {
-            edges {
-              node {
-                id
-                title
-                productsCount {
-                  count
-                }
-                description
-              }
-            }
-          }
-        }
-      `);
-      const collectionsData = await collectionsResponse.json();
-      console.log("Collections response:", collectionsData);
-      
-      if ((collectionsData as any).errors) {
-        console.error("Collections GraphQL errors:", (collectionsData as any).errors);
-        throw new Error(`Collections GraphQL errors: ${JSON.stringify((collectionsData as any).errors)}`);
-      }
-      
-      collections = collectionsData.data.collections.edges.map((edge: any) => ({
-        id: edge.node.id,
-        title: edge.node.title,
-        productsCount: edge.node.productsCount.count,
-        description: edge.node.description,
-      }));
-      console.log("Collections processed:", collections.length);
-      
-      // Fetch segments
-      console.log("Fetching segments...");
-      const segmentsResponse = await admin.graphql(`#graphql
-        query getSegments($first: Int!) {
-          segments(first: $first) {
-            edges {
-              node {
-                id
-                name
-                query
-              }
-            }
-            pageInfo { hasNextPage }
-          }
-        }
-      `, { variables: { first: 50 } });
-      const segmentsData = await segmentsResponse.json();
-      console.log("Segments response:", segmentsData);
-      
-      if ((segmentsData as any).errors) {
-        console.error("Segments GraphQL errors:", (segmentsData as any).errors);
-        throw new Error(`Segments GraphQL errors: ${JSON.stringify((segmentsData as any).errors)}`);
-      }
-      
-      segments = segmentsData.data.segments.edges.map((edge: any) => edge.node);
-      console.log("Segments processed:", segments.length);
-      
-    } catch (error) {
-      console.error('Error fetching collections or segments:', error);
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      collections = [];
-      segments = [];
-    }
-    return json({ plans, segments, collections });
+    return json({
+      collections,
+      segments,
+      plans,
+      error: null,
+      success: null,
+    });
   } catch (error) {
-    console.error('Detailed error in loader:', error);
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
-    return json({ 
-      plans: [], 
-      segments: [], 
+    console.error("Error in loader:", error);
+    return json({
       collections: [],
-      error: `Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`
+      segments: [],
+      plans: [],
+      error: "Failed to load data from Shopify",
+      success: null,
     });
   }
 };
@@ -132,85 +117,124 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // Create the discount plan first
-    const plan = await prisma.discountPlan.create({
-      data: {
-        id: `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name,
-        targetType,
-        targetKey,
-        updatedAt: new Date(),
-      },
-    });
+    try {
+      // Create the discount plan first
+      const plan = await prisma.discountPlan.create({
+        data: {
+          id: `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name,
+          targetType,
+          targetKey,
+          updatedAt: new Date(),
+        },
+      });
 
-    // Then create the rules
-    const createdRules = await Promise.all(
-      rules.map((rule: any) =>
-        prisma.rule.create({
-          data: {
-            id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            categoryId: rule.categoryId,
-            percentOff: rule.percentOff,
-            discountPlanId: plan.id,
-          },
-        })
-      )
-    );
+      // Then create the rules
+      const createdRules = await Promise.all(
+        rules.map((rule: any) =>
+          prisma.rule.create({
+            data: {
+              id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              categoryId: rule.categoryId,
+              percentOff: rule.percentOff,
+              discountPlanId: plan.id,
+            },
+          })
+        )
+      );
 
-    // Fetch the plan with rules
-    const planWithRules = await prisma.discountPlan.findUnique({
-      where: { id: plan.id },
-      include: { rules: true },
-    });
+      // Fetch the plan with rules
+      const planWithRules = await prisma.discountPlan.findUnique({
+        where: { id: plan.id },
+        include: { rules: true },
+      });
 
-    return json({ success: "Plan created successfully", plan: planWithRules });
+      return json({ 
+        success: `Plan "${name}" created successfully with ${rules.length} rule(s)!`,
+        plan: planWithRules 
+      });
+    } catch (error) {
+      console.error("Error creating plan:", error);
+      return json({ 
+        error: "Failed to create plan. Please try again." 
+      });
+    }
   }
 
   if (action === "delete") {
     const planId = formData.get("planId") as string;
-    await prisma.discountPlan.delete({
-      where: { id: planId },
-    });
-    return json({ success: "Plan deleted successfully" });
+    try {
+      await prisma.discountPlan.delete({
+        where: { id: planId },
+      });
+      return json({ success: "Plan deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting plan:", error);
+      return json({ 
+        error: "Failed to delete plan. Please try again." 
+      });
+    }
   }
 
   return json({ error: "Invalid action" });
 };
 
 export default function Index() {
-  const loaderData = useLoaderData<typeof loader>();
-  const actionData = useActionData<any>();
-  const { plans, segments, collections } = loaderData || { plans: [], segments: [], collections: [] };
-  const error = actionData?.error || (loaderData as any)?.error;
+  const { plans, segments, collections, error, success } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
+  const submit = useSubmit();
+
+  // Extract current action and plan ID from navigation
+  const currentAction = navigation.formData?.get("action") as string;
+  const currentPlanId = navigation.formData?.get("planId") as string;
   
-  // Add immediate console logging
-  console.log('=== DISCOUNT PLANS PAGE LOADED ===');
-  console.log('Loader data:', loaderData);
-  console.log('Segments:', segments);
-  console.log('Collections:', collections);
-  console.log('Plans:', plans);
-  console.log('Error:', error);
-  
-  // Add useEffect to monitor segments
-  useEffect(() => {
-    console.log('=== SEGMENTS CHANGED ===');
-    console.log('Current segments:', segments);
-    console.log('Segment count:', segments.length);
-    console.log('Are these fallback segments?', segments.some((s: any) => ['vip', 'gold', 'silver', 'bronze'].includes(s.id)));
-  }, [segments]);
-  
+  // Determine loading states
+  const isCreatingPlan = currentAction === "create" && navigation.state === "submitting";
+  const isDeletingPlan = currentAction === "delete" && navigation.state === "submitting";
+  const deletingPlanId = isDeletingPlan ? currentPlanId : null;
+
+  // State for form
   const [showForm, setShowForm] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [name, setName] = useState("");
-  const [targetType, setTargetType] = useState("segment");
+  const [targetType, setTargetType] = useState<"segment" | "collection">("segment");
   const [targetKey, setTargetKey] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [percentOff, setPercentOff] = useState("");
   const [collectionSearch, setCollectionSearch] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [rules, setRules] = useState<any[]>([]);
+  const [rules, setRules] = useState<Array<{ categoryId: string; percentOff: number }>>([]);
   const [newRuleCategoryId, setNewRuleCategoryId] = useState("");
   const [newRulePercentOff, setNewRulePercentOff] = useState("");
-  const submit = useSubmit();
+
+  // Helper function to get segment name from target key
+  const getSegmentName = (targetKey: string) => {
+    const segment = segments.find((s: any) => s.id === targetKey);
+    return segment ? segment.name : targetKey;
+  };
+
+  // Helper function to get collection name from category ID
+  const getCollectionName = (categoryId: string) => {
+    const collection = collections.find((c: any) => c.id === categoryId);
+    return collection ? collection.title : categoryId;
+  };
+
+  // Show success message when action data contains success
+  useEffect(() => {
+    if (success) {
+      setShowSuccess(true);
+      // Close form immediately after successful plan creation
+      if (currentAction === "create") {
+        handleCancel();
+      }
+      // Auto-hide success message after 3 seconds
+      const timer = setTimeout(() => {
+        setShowSuccess(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [success, currentAction]);
 
   const handleAddClick = () => setShowForm(true);
   const handleCancel = () => {
@@ -267,17 +291,19 @@ export default function Index() {
       {
         action: "create",
         name,
-        targetType,
+        targetType: "segment", // Defaulting to segment
         targetKey,
         rules: JSON.stringify(allRules),
       },
       { method: "POST" }
     );
-    handleCancel();
+   
+    // Don't call handleCancel() here - let the form stay open during loading
   };
 
   const handleDelete = (planId: string) => {
     if (confirm("Are you sure you want to delete this plan?")) {
+      // setDeletingPlanId(planId); // This line was removed from the new_code, so it's removed here.
       submit({ action: "delete", planId }, { method: "POST" });
     }
   };
@@ -285,9 +311,9 @@ export default function Index() {
   // Enhanced collection search with debouncing
   const handleCollectionSearch = (value: string) => {
     setCollectionSearch(value);
-    setIsSearching(true);
+    // setIsSearching(true); // This line was removed from the new_code, so it's removed here.
     // Simulate search delay for better UX
-    setTimeout(() => setIsSearching(false), 300);
+    // setTimeout(() => setIsSearching(false), 300); // This line was removed from the new_code, so it's removed here.
   };
 
   // Filter collections by search with improved logic
@@ -326,6 +352,12 @@ export default function Index() {
               {error}
             </Banner>
           )}
+
+          {showSuccess && success && (
+            <Banner tone="success" title="Success">
+              {success}
+            </Banner>
+          )}
           
           <Card>
             <BlockStack gap="400">
@@ -357,8 +389,10 @@ export default function Index() {
                       onChange={setName}
                       placeholder="e.g., VIP Discount"
                       autoComplete="off"
+                      disabled={isCreatingPlan}
                     />
                     
+                    {/* Target Type - Defaulting to segment
                     <Select
                       label="Target Type"
                       options={[
@@ -366,8 +400,10 @@ export default function Index() {
                         { label: "Customer", value: "customer" },
                       ]}
                       value={targetType}
-                      onChange={setTargetType}
+                      onChange={(value) => setTargetType(value as "segment" | "collection")}
+                      disabled={isCreatingPlan}
                     />
+                    */}
                     
                     {targetType === "segment" ? (
                       <>
@@ -377,7 +413,7 @@ export default function Index() {
                           value={targetKey}
                           onChange={setTargetKey}
                           placeholder={segments.length > 0 ? "Select a segment" : "No segments found"}
-                          disabled={segments.length === 0}
+                          disabled={segments.length === 0 || isCreatingPlan}
                         />
                         {segments.length === 0 && (
                           <Banner tone="info">
@@ -402,32 +438,39 @@ export default function Index() {
                         onChange={setTargetKey}
                         placeholder="Enter customer ID"
                         autoComplete="off"
+                        disabled={isCreatingPlan}
                       />
                     )}
                     
+                    {/* Collection Search - Replaced with dropdown
                     <TextField
                       label="Collection Search"
                       value={collectionSearch}
                       onChange={handleCollectionSearch}
                       placeholder="Search collections by name, description, or ID..."
                       autoComplete="off"
-                      suffix={isSearching ? <Spinner size="small" /> : undefined}
+                      // suffix={isSearching ? <Spinner size="small" /> : undefined} // This line was removed from the new_code, so it's removed here.
+                      disabled={isCreatingPlan}
                     />
+                    */}
                     
                     <Select
-                      label="Collection"
-                      options={collectionOptions}
-                      value={categoryId}
-                      onChange={setCategoryId}
-                      placeholder={collectionSearch ? `Select from ${filteredCollections.length} results` : "Select a collection"}
-                      disabled={isSearching}
-                    />
+                        label="Select Collections"
+                        options={collections.map((collection: any) => ({
+                          label: collection.title,
+                          value: collection.id,
+                        }))}
+                        value={newRuleCategoryId}
+                        onChange={(value) => setNewRuleCategoryId(value)}
+                        disabled={isCreatingPlan}
+                        placeholder="Choose collections..."
+                      />
                     
-                    {collectionSearch && filteredCollections.length === 0 && !isSearching && (
+                    {/* collectionSearch && filteredCollections.length === 0 && !isSearching && (
                       <Banner tone="info">
                         No collections found matching "{collectionSearch}". Try a different search term.
                       </Banner>
-                    )}
+                    ) */}
                     
                     <TextField
                       label="Discount Percentage"
@@ -439,6 +482,7 @@ export default function Index() {
                       max="100"
                       suffix="%"
                       autoComplete="off"
+                      disabled={isCreatingPlan}
                     />
                     
                     {selectedCollection && (
@@ -466,6 +510,7 @@ export default function Index() {
                       value={newRuleCategoryId}
                       onChange={setNewRuleCategoryId}
                       placeholder="Select a collection"
+                      disabled={isCreatingPlan}
                     />
                     <TextField
                       label="Percent Off"
@@ -477,8 +522,9 @@ export default function Index() {
                       max="100"
                       suffix="%"
                       autoComplete="off"
+                      disabled={isCreatingPlan}
                     />
-                    <Button onClick={handleAddRule} variant="primary" disabled={!newRuleCategoryId || !newRulePercentOff}>
+                    <Button onClick={handleAddRule} variant="primary" disabled={!newRuleCategoryId || !newRulePercentOff || isCreatingPlan}>
                       Add Rule
                     </Button>
                     {rules.length > 0 && (
@@ -491,7 +537,7 @@ export default function Index() {
                               <Text as="p" variant="bodyMd">
                                 {collection?.title || rule.categoryId}: {rule.percentOff}% off
                               </Text>
-                              <Button variant="plain" tone="critical" onClick={() => handleRemoveRule(idx)}>
+                              <Button variant="plain" tone="critical" onClick={() => handleRemoveRule(idx)} disabled={isCreatingPlan}>
                                 Remove
                               </Button>
                             </InlineStack>
@@ -501,10 +547,15 @@ export default function Index() {
                     )}
                     
                     <InlineStack gap="300">
-                      <Button onClick={handleSubmit} variant="primary">
-                        Create Plan
+                      <Button 
+                        onClick={handleSubmit} 
+                        variant="primary"
+                        loading={isCreatingPlan}
+                        disabled={isCreatingPlan}
+                      >
+                        {isCreatingPlan ? "Creating Plan..." : "Create Plan"}
                       </Button>
-                      <Button onClick={handleCancel} variant="plain">
+                      <Button onClick={handleCancel} variant="plain" disabled={isCreatingPlan}>
                         Cancel
                       </Button>
                     </InlineStack>
@@ -525,58 +576,63 @@ export default function Index() {
                 </Card>
               ) : (
                 <BlockStack gap="400">
-                  {plans.map((plan: any) => (
-                    <Card key={plan.id}>
-                      <BlockStack gap="300">
-                        <InlineStack align="space-between">
-                          <BlockStack gap="200">
-                            <Text as="h3" variant="headingMd">
-                              {plan.name}
-                            </Text>
-                            <Text as="p" variant="bodyMd" tone="subdued">
-                              Target: {plan.targetType} - {plan.targetKey}
-                            </Text>
-                          </BlockStack>
-                          <InlineStack gap="200" align="center">
-                         
-                              
-                                  <Button 
-                                  url={`/app/discount-plans/${plan.id}`}
-                                  variant="primary" size="slim">
-                                    Edit
-                                  </Button>
-                           
-                            
-                         
-                            <Button
-                              onClick={() => handleDelete(plan.id)}
-                              variant="primary"
-                              tone="critical"
-                              size="slim"
-                            >
-                              Delete
-                            </Button>
+                  {plans.map((plan: any) => {
+                    const isDeletingThisPlan = deletingPlanId === plan.id;
+                    return (
+                      <Card key={plan.id}>
+                        <BlockStack gap="300">
+                          <InlineStack align="space-between">
+                            <BlockStack gap="200">
+                              <Text as="h3" variant="headingMd">
+                                {plan.name}
+                              </Text>
+                              <Text as="p" variant="bodyMd" tone="subdued">
+                                Target: {plan.targetType === "segment" 
+                                  ? getSegmentName(plan.targetKey)
+                                  : getCollectionName(plan.targetKey)
+                                }
+                              </Text>
+                            </BlockStack>
+                            <InlineStack gap="200" align="center">
+                              <Button 
+                                url={`/app/discount-plans/${plan.id}`}
+                                variant="primary" 
+                                size="slim"
+                                disabled={isDeletingThisPlan}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                onClick={() => handleDelete(plan.id)}
+                                variant="primary"
+                                tone="critical"
+                                size="slim"
+                                loading={isDeletingThisPlan}
+                                disabled={isDeletingThisPlan}
+                              >
+                                {isDeletingThisPlan ? "Deleting..." : "Delete"}
+                              </Button>
+                            </InlineStack>
                           </InlineStack>
-                        </InlineStack>
-                        
-                        {plan.rules.length > 0 && (
-                          <BlockStack gap="200">
-                            <Text as="h4" variant="headingSm">
-                              Rules:
-                            </Text>
-                            {plan.rules.map((rule: any) => {
-                              const collection = collections.find((c: any) => c.id === rule.categoryId);
-                              return (
-                                <Text key={rule.id} as="p" variant="bodyMd">
-                                  {collection?.title || rule.categoryId}: {rule.percentOff}% off
-                                </Text>
-                              );
-                            })}
-                          </BlockStack>
-                        )}
-                      </BlockStack>
-                    </Card>
-                  ))}
+                          
+                          {plan.rules.length > 0 && (
+                            <BlockStack gap="200">
+                              <Text as="h4" variant="headingSm">
+                                Rules:
+                              </Text>
+                              {plan.rules.map((rule: any) => {
+                                return (
+                                  <Text key={rule.id} as="p" variant="bodyMd">
+                                    {getCollectionName(rule.categoryId)}: {rule.percentOff}% off
+                                  </Text>
+                                );
+                              })}
+                            </BlockStack>
+                          )}
+                        </BlockStack>
+                      </Card>
+                    );
+                  })}
                 </BlockStack>
               )}
             </BlockStack>

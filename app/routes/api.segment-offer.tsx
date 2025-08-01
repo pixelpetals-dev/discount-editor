@@ -201,7 +201,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return addCorsHeaders(response, request);
 
   } catch (error) {
-    console.error("Error in simple test segment offer endpoint:", error);
+    console.error("Error in segment offer endpoint:", error);
     const response = json({ 
       error: "Internal server error", 
       details: error instanceof Error ? error.message : "Unknown error",
@@ -401,7 +401,7 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
     return addCorsHeaders(response, request);
 
   } catch (error) {
-    console.error("Error in simple test segment offer endpoint:", error);
+    console.error("Error in segment offer endpoint:", error);
     const response = json({ 
       error: "Internal server error", 
       details: error instanceof Error ? error.message : "Unknown error",
