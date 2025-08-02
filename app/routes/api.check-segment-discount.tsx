@@ -175,14 +175,28 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // 5. Get discount plan for this segment
     console.log('Looking for discount plan with targetKey:', matchedSegment.id);
+    console.log('Also trying with segment name:', matchedSegment.name);
     
-    const discountPlan = await prisma.discountPlan.findFirst({
+    // Try to find discount plan by segment ID first, then by segment name
+    let discountPlan = await prisma.discountPlan.findFirst({
       where: {
         targetType: "segment",
         targetKey: matchedSegment.id
       },
       include: { rules: true }
     });
+    
+    // If not found by ID, try by segment name
+    if (!discountPlan) {
+      console.log('Not found by segment ID, trying by segment name:', matchedSegment.name);
+      discountPlan = await prisma.discountPlan.findFirst({
+        where: {
+          targetType: "segment",
+          targetKey: matchedSegment.name
+        },
+        include: { rules: true }
+      });
+    }
 
     if (!discountPlan || discountPlan.rules.length === 0) {
       console.log('No discount plan found for segment:', matchedSegment.name, 'targetKey:', matchedSegment.id);
@@ -200,6 +214,7 @@ export async function action({ request }: ActionFunctionArgs) {
         debug: {
           segmentName: matchedSegment.name,
           segmentId: matchedSegment.id,
+          searchedTargetKeys: [matchedSegment.id, matchedSegment.name],
           allDiscountPlans: allDiscountPlans
         }
       });

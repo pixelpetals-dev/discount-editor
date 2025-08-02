@@ -1,0 +1,59 @@
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const checkoutBtn = document.querySelector('button[name="checkout"]');
+  const loader     = document.getElementById('checkout-loader');
+
+  if (!checkoutBtn || !loader) return;
+
+  function showLoader() {
+    loader.style.display = 'flex';
+  }
+  function hideLoader() {
+    loader.style.display = 'none';
+  }
+
+  checkoutBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    showLoader();
+    console.log('🛒 Checkout button clicked, showing loader');
+
+    // 1) Must be logged in
+    const customer = window.customerData;
+    if (!customer?.id) {
+      console.warn('⚠️ Not logged in → redirect to login');
+      return window.location.href = '/account/login?checkout_redirect=true';
+    }
+
+    // 2) Call your discount-check endpoint
+    let result = { discountApplicable: false };
+    try {
+      const res = await fetch('https://discount-editor-q174l2s84-pixelpetals-devs-projects.vercel.app/api/check-segment-discount', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shop: Shopify.shop,
+          customerId: `gid://shopify/Customer/${customer.id}`,
+          cartItems: JSON.parse(document.querySelector('.data-json-cart').innerHTML)
+        })
+      });
+      result = await res.json();
+      console.log('🎯 Discount check response:', result);
+    } catch (err) {
+      console.error('🚨 Error checking discount:', err);
+    }
+
+    // 3) If we got a draftOrderUrl, redirect there
+    if (result.draftOrderUrl) {
+      console.log('🚀 Redirecting to draft order:', result.draftOrderUrl);
+      return window.location.href = result.draftOrderUrl;
+    }
+
+    // 4) Otherwise go to native Shopify checkout
+    console.log('➡️ No draft URL → redirecting to /checkout');
+    hideLoader();
+    window.location.href = '/checkout';
+  });
+});
+</script>

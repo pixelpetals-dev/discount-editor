@@ -1,0 +1,327 @@
+<script>
+(function() {
+  'use strict';
+  
+  // Configuration
+  const CONFIG = {
+    BACKEND_URL: 'https://discount-editor.vercel.app/api/segment-offer',
+    CACHE_KEY: 'segmentOfferCache',
+    CACHE_TTL_MS: 5 * 60 * 1000, // 5 minutes
+    MARQUEE_ID: 'segment-offer-marquee'
+  };
+
+  // Global state
+  let offerData = null;
+  let isInitialized = false;
+
+  // Utility functions
+  const utils = {
+    // Get cached offer if fresh
+    getCachedOffer() {
+      try {
+        const raw = sessionStorage.getItem(CONFIG.CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (Date.now() - (parsed.fetchedAt || 0) > CONFIG.CACHE_TTL_MS) {
+          sessionStorage.removeItem(CONFIG.CACHE_KEY);
+          return null;
+        }
+        return parsed.data;
+      } catch (e) {
+        console.warn('[SegmentOffer] Cache parse error:', e);
+        sessionStorage.removeItem(CONFIG.CACHE_KEY);
+        return null;
+      }
+    },
+
+    // Set cache
+    setCachedOffer(data) {
+      try {
+        sessionStorage.setItem(CONFIG.CACHE_KEY, JSON.stringify({
+          fetchedAt: Date.now(),
+          data
+        }));
+      } catch (e) {
+        console.warn('[SegmentOffer] Failed to set cache:', e);
+      }
+    },
+
+    // Get customer data
+    getCustomerData() {
+      return window.Shopify?.customer || window.customerData || null;
+    },
+
+    // Check if element exists
+    elementExists(id) {
+      return !!document.getElementById(id);
+    },
+
+    // Debounce function
+    debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+  };
+
+  // API functions
+  const api = {
+    // Fetch offer from backend
+    async fetchOffer(customer) {
+      if (!customer || !customer.id) {
+        console.warn('[SegmentOffer] No customer to query');
+        return null;
+      }
+
+      // Check cache first
+      const cached = utils.getCachedOffer();
+      if (cached) {
+        console.log('[SegmentOffer] Using cached offer');
+        return cached;
+      }
+
+             const payload = {
+         customerData: JSON.stringify({
+           id: customer.id,
+           email: customer.email,
+           name: customer.name,
+           tags: customer.tags || []
+         }),
+         storeUrl: window.location.origin // Send the current store URL
+       };
+
+      console.log('[SegmentOffer] Fetching offer from backend');
+
+      try {
+        const res = await fetch(CONFIG.BACKEND_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload),
+          credentials: 'include'
+        });
+
+        if (!res.ok) {
+          console.warn('[SegmentOffer] Backend returned non-OK status:', res.status);
+          return null;
+        }
+
+        const json = await res.json();
+        console.log('[SegmentOffer] Backend response:', json);
+
+        // Normalize response
+        const offerObj = {
+          success: json.success === undefined ? true : json.success,
+          offer: {
+            discountApplicable: json.offer?.discountApplicable ?? json.discountApplicable ?? false,
+            segmentName: json.offer?.segmentName || json.segment || null,
+            planName: json.offer?.planName || json.planName || null,
+            collections: (json.offer?.collections || json.collections || []).map(c => ({
+              id: c.id,
+              title: c.title || c.name || '',
+              handle: c.handle || '',
+              percentOff: c.percentOff
+            })),
+            highestDiscountRate: json.offer?.highestDiscountRate ?? json.highestDiscountRate ?? 0
+          },
+          customer: json.customer || {
+            id: customer.id,
+            email: customer.email,
+            name: customer.name,
+            tags: customer.tags || []
+          }
+        };
+
+        // Cache the result
+        utils.setCachedOffer(offerObj);
+        return offerObj;
+      } catch (err) {
+        console.error('[SegmentOffer] Fetch failed:', err);
+        return null;
+      }
+    }
+  };
+
+  // UI functions
+  const ui = {
+    // Render marquee
+    renderMarquee(offer) {
+      if (!offer || !offer.discountApplicable) return;
+
+      // Avoid rendering twice
+      if (utils.elementExists(CONFIG.MARQUEE_ID)) return;
+
+      const segmentName = offer.segmentName || offer.segment || 'valued';
+      const planName = offer.planName || '';
+      const collections = Array.isArray(offer.collections) ? offer.collections : [];
+      
+      if (collections.length === 0) return;
+
+             const parts = collections.map(c => {
+         const title = c.title || c.name || c.handle || c.id;
+         const handle = c.handle || '';
+         // Get the current store domain
+         const currentDomain = window.location.origin;
+         const collectionUrl = handle ? `${currentDomain}/collections/${handle}` : '#';
+         
+         return `<a href="${collectionUrl}" class="collection-tag">${title} (${c.percentOff}% off)</a>`;
+       });
+
+      const message = `You are our ${segmentName} customer and you have a personal discount under "${planName}" for ${parts.join(' ')}.`;
+
+      const container = document.createElement('div');
+      container.id = CONFIG.MARQUEE_ID;
+      container.className = 'segment-offer-marquee';
+      container.innerHTML = `<div class="text" aria-live="polite">${message}</div>`;
+
+      // Insert under header/navbar if exists, else prepend to body
+      const reference = document.querySelector('header') || document.body.firstElementChild;
+      if (reference && reference.parentNode) {
+        reference.insertAdjacentElement('afterend', container);
+      } else {
+        document.body.prepend(container);
+      }
+
+      console.log('[SegmentOffer] Marquee rendered successfully');
+    },
+
+    // Add CSS styles
+    addStyles() {
+      if (utils.elementExists('segment-offer-styles')) return;
+
+      const style = document.createElement('style');
+      style.id = 'segment-offer-styles';
+      style.textContent = `
+        .segment-offer-marquee {
+          background: white;
+          color: white;
+          padding: 12px 20px;
+          text-align: center;
+          font-weight: 500;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          position: relative;
+          z-index: 1000;
+        }
+        .segment-offer-marquee .text {
+          margin: 0;
+          font-size: 16px;
+          line-height: 1.4;
+          font-weight: 500;
+          color: #991a32;
+        }
+        .segment-offer-marquee .collection-tag {
+          display: inline-block;
+          background: #991a32;
+          color: white;
+          padding: 4px 8px;
+          margin: 0 4px;
+          border-radius: 12px;
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 600;
+          transition: all 0.2s ease;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .segment-offer-marquee .collection-tag:hover {
+          background: #7a1428;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        @media (max-width: 768px) {
+          .segment-offer-marquee .text {
+            font-size: 13px;
+          }
+          .segment-offer-marquee .collection-tag {
+            font-size: 12px;
+            padding: 3px 6px;
+            margin: 0 2px;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  };
+
+  // Main application
+  const app = {
+    // Initialize the application
+    async init() {
+      if (isInitialized) return;
+      isInitialized = true;
+
+      console.log('[SegmentOffer] Initializing...');
+
+      // Add styles immediately
+      ui.addStyles();
+
+      // Get customer data
+      const customer = utils.getCustomerData();
+      if (!customer) {
+        console.log('[SegmentOffer] No customer data available');
+        return;
+      }
+
+      // Fetch offer
+      const offer = await api.fetchOffer(customer);
+      if (!offer) {
+        console.log('[SegmentOffer] No offer data received');
+        return;
+      }
+
+      // Store globally
+      window.segmentOfferData = offer;
+
+      // Log results
+      if (offer.offer.discountApplicable) {
+        console.log(`[SegmentOffer] Customer is in segment "${offer.offer.segmentName}" with plan "${offer.offer.planName}", highest discount: ${offer.offer.highestDiscountRate}%`);
+        
+        // Render marquee
+        ui.renderMarquee(offer.offer);
+      } else {
+        console.log('[SegmentOffer] No applicable segment offer for customer');
+      }
+    },
+
+    // Manual refresh function
+    async refresh() {
+      const customer = utils.getCustomerData();
+      if (!customer) return null;
+      
+      // Clear cache
+      sessionStorage.removeItem(CONFIG.CACHE_KEY);
+      
+      // Fetch fresh data
+      const offer = await api.fetchOffer(customer);
+      if (offer) {
+        window.segmentOfferData = offer;
+        if (offer.offer.discountApplicable) {
+          ui.renderMarquee(offer.offer);
+        }
+      }
+      return offer;
+    }
+  };
+
+  // Expose refresh function globally
+  window.refreshSegmentOffer = app.refresh;
+
+  // Initialize on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', app.init);
+  } else {
+    // DOM is already ready
+    app.init();
+  }
+
+  // Also initialize on window load for better reliability
+  window.addEventListener('load', app.init);
+
+})();
+</script>
