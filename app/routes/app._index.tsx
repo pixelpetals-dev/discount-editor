@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useActionData, useNavigation, useSubmit } from "@remix-run/react";
+import { useLoaderData, useActionData, useNavigation, useSubmit, Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import { prisma } from "../db.server";
@@ -667,6 +667,22 @@ export default function Index() {
       </BlockStack>
         </Modal.Section>
       </Modal>
+      
+      {/* Footer */}
+      
+        <Link 
+          to="https://pixelpetals.com" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          style={{
+            textDecoration: 'none',
+            color: '#6d7175',
+            fontWeight: '500'
+          }}
+        >
+          Developed by Pixel Petals
+        </Link>
+     
     </>
   );
 }

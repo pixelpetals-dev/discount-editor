@@ -1,6 +1,6 @@
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { useLoaderData, Form, useParams, useActionData, useNavigation, useSubmit } from "@remix-run/react";
+import { useLoaderData, Form, useParams, useActionData, useNavigation, useSubmit, Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { Page, Card, Button, BlockStack, Text, Layout, TextField, InlineStack, Select, Banner, Modal, ChoiceList, Spinner } from "@shopify/polaris";
 import { prisma } from "../db.server";
@@ -502,6 +502,32 @@ export default function DiscountPlanEditPage() {
           </BlockStack>
         </Modal.Section>
       </Modal>
+      
+      {/* Footer */}
+      <div style={{
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        zIndex: 1000,
+        backgroundColor: 'transparent',
+        padding: '8px 12px',
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: '#6d7175'
+      }}>
+        <Link 
+          to="https://pixelpetals.com" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          style={{
+            textDecoration: 'none',
+            color: '#6d7175',
+            fontWeight: '500'
+          }}
+        >
+          Developed by Pixel Petals
+        </Link>
+      </div>
     </>
   );
 }
