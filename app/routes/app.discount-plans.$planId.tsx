@@ -150,7 +150,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
     });
 
-    return json({ success: "Plan updated successfully" });
+    return redirect("/app");
   }
 
   if (intent === "deletePlan") {
@@ -184,6 +184,7 @@ export default function DiscountPlanEditPage() {
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
   const [collectionSearch, setCollectionSearch] = useState("");
   const [collectionPercentages, setCollectionPercentages] = useState<Record<string, number>>({});
+  const [collectionsToShow, setCollectionsToShow] = useState(5); // Pagination state
 
   // Loading states
   const isUpdatingPlan = navigation.state === "submitting" && navigation.formData?.get("intent") === "updatePlan";
@@ -211,6 +212,7 @@ export default function DiscountPlanEditPage() {
         existingPercentages[rule.categoryId] = rule.percentOff;
       });
       setCollectionPercentages(existingPercentages);
+      setCollectionsToShow(5); // Reset pagination when modal opens
     }
   }, [showCollectionModal, rules]);
 
@@ -260,10 +262,21 @@ export default function DiscountPlanEditPage() {
     setShowCollectionModal(true);
   };
 
+  const handleLoadMore = () => {
+    setCollectionsToShow(prev => prev + 5);
+  };
+
   const segmentOptions = segments.map((s: any) => ({ 
     label: s.name, 
     value: s.id 
   }));
+
+  // Filter and paginate collections
+  const filteredCollections = collections.filter((collection: any) => 
+    collection.title.toLowerCase().includes(collectionSearch.toLowerCase())
+  );
+  const displayedCollections = filteredCollections.slice(0, collectionsToShow);
+  const hasMoreCollections = displayedCollections.length < filteredCollections.length;
 
   return (
     <>
@@ -276,12 +289,6 @@ export default function DiscountPlanEditPage() {
             {actionData?.error && (
               <Banner tone="critical">
                 {actionData.error}
-              </Banner>
-            )}
-            
-            {actionData?.success && (
-              <Banner tone="success">
-                {actionData.success}
               </Banner>
             )}
 
@@ -420,6 +427,7 @@ export default function DiscountPlanEditPage() {
             setSelectedCollections([]);
             setCollectionSearch("");
             setCollectionPercentages({});
+            setCollectionsToShow(5); // Reset pagination
           },
         }}
         secondaryActions={[
@@ -441,18 +449,24 @@ export default function DiscountPlanEditPage() {
             
             <ChoiceList
               title="Collections"
-              choices={collections
-                .filter((collection: any) => 
-                  collection.title.toLowerCase().includes(collectionSearch.toLowerCase())
-                )
-                .map((collection: any) => ({
-                  label: collection.title,
-                  value: collection.id,
-                }))}
+              choices={displayedCollections.map((collection: any) => ({
+                label: collection.title,
+                value: collection.id,
+              }))}
               selected={selectedCollections}
               onChange={setSelectedCollections}
               allowMultiple
             />
+            
+            {hasMoreCollections && (
+              <Button
+                onClick={handleLoadMore}
+                variant="plain"
+                size="slim"
+              >
+                Load More Collections
+              </Button>
+            )}
             
             {selectedCollections.length > 0 && (
               <BlockStack gap="400">
