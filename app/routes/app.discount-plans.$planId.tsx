@@ -1,8 +1,8 @@
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { useLoaderData, Form, useParams, useActionData } from "@remix-run/react";
-import { useState } from "react";
-import { Page, Card, Button, BlockStack, Text, Layout, TextField, InlineStack, Select, Banner } from "@shopify/polaris";
+import { useLoaderData, Form, useParams, useActionData, useNavigation, useSubmit } from "@remix-run/react";
+import { useState, useEffect } from "react";
+import { Page, Card, Button, BlockStack, Text, Layout, TextField, InlineStack, Select, Banner, Modal, ChoiceList, Spinner } from "@shopify/polaris";
 import { prisma } from "../db.server";
 import { authenticate } from "../shopify.server";
 
@@ -92,63 +92,70 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "updatePlan") {
     const name = formData.get("name") as string;
-    const targetType = formData.get("targetType") as string;
     const targetKey = formData.get("targetKey") as string;
+    const rulesData = formData.get("rules") as string;
 
-    if (!name || !targetType || !targetKey) {
-      return json({ error: "All fields are required" });
+    if (!name || !targetKey) {
+      return json({ error: "Plan name and segment are required" });
     }
 
     // Check for duplicate segments (excluding current plan)
-    if (targetType === "segment") {
-      const existing = await prisma.discountPlan.findFirst({
-        where: { 
-          targetType: "segment", 
-          targetKey,
-          id: { not: params.planId }
-        },
-      });
-      if (existing) {
-        return json({ error: "A discount plan for this segment already exists." });
-      }
+    const existing = await prisma.discountPlan.findFirst({
+      where: { 
+        targetType: "segment", 
+        targetKey,
+        id: { not: params.planId }
+      },
+    });
+    if (existing) {
+      return json({ error: "A discount plan for this segment already exists." });
     }
 
-    await prisma.discountPlan.update({
-      where: { id: params.planId },
-      data: { name, targetType, targetKey },
+    // Parse rules data
+    let rules = [];
+    try {
+      rules = JSON.parse(rulesData || "[]");
+    } catch (error) {
+      console.error('Error parsing rules:', error);
+      return json({ error: "Invalid rules data" });
+    }
+
+    // Update plan and rules in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Update the plan
+      await tx.discountPlan.update({
+        where: { id: params.planId },
+        data: { 
+          name, 
+          targetType: "segment", // Always segment
+          targetKey 
+        },
+      });
+
+      // Delete existing rules
+      await tx.rule.deleteMany({
+        where: { discountPlanId: params.planId as string },
+      });
+
+      // Create new rules
+      for (const rule of rules) {
+        await tx.rule.create({
+          data: {
+            id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            categoryId: rule.categoryId,
+            percentOff: rule.percentOff,
+            discountPlanId: params.planId as string,
+          },
+        });
+      }
     });
 
     return json({ success: "Plan updated successfully" });
   }
 
-  if (intent === "addRule") {
-    const categoryId = formData.get("categoryId") as string;
-    const percentOff = parseFloat(formData.get("percentOff") as string);
-
-    if (!categoryId || isNaN(percentOff)) {
-      return json({ error: "Category and percent off are required" });
-    }
-
-    await prisma.rule.create({
-      data: {
-        categoryId,
-        percentOff,
-        discountPlanId: params.planId as string,
-      },
-    });
-
-    return json({ success: "Rule added successfully" });
-  }
-
-  if (intent === "deleteRule") {
-    const ruleId = formData.get("ruleId") as string;
-    await prisma.rule.delete({ where: { id: ruleId } });
-    return json({ success: "Rule deleted successfully" });
-  }
-
   if (intent === "deletePlan") {
     await prisma.discountPlan.delete({ where: { id: params.planId } });
-    return redirect("/app/discount-plans");
+    return redirect("/app");
   }
 
   return json({ error: "Invalid action" });
@@ -158,218 +165,330 @@ export default function DiscountPlanEditPage() {
   console.log('=== EDIT PAGE COMPONENT RENDERED ===');
   const { plan, segments, collections } = useLoaderData<typeof loader>();
   const actionData = useActionData<any>();
+  const navigation = useNavigation();
+  const submit = useSubmit();
   const { planId } = useParams();
   
   console.log('Plan:', plan);
   console.log('Plan ID from params:', planId);
   
   const [name, setName] = useState(plan.name);
-  const [targetType, setTargetType] = useState(plan.targetType);
   const [targetKey, setTargetKey] = useState(plan.targetKey);
-  const [newCategoryId, setNewCategoryId] = useState("");
-  const [newPercentOff, setNewPercentOff] = useState("");
+  const [rules, setRules] = useState(plan.rules.map((rule: any) => ({
+    categoryId: rule.categoryId,
+    percentOff: rule.percentOff,
+  })));
+  
+  // Modal state
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
+  const [collectionSearch, setCollectionSearch] = useState("");
+  const [collectionPercentages, setCollectionPercentages] = useState<Record<string, number>>({});
+
+  // Loading states
+  const isUpdatingPlan = navigation.state === "submitting" && navigation.formData?.get("intent") === "updatePlan";
+  const isDeletingPlan = navigation.state === "submitting" && navigation.formData?.get("intent") === "deletePlan";
+
+  // Helper functions
+  const getSegmentName = (segmentId: string) => {
+    const segment = segments.find((s: any) => s.id === segmentId);
+    return segment ? segment.name : segmentId;
+  };
+
+  const getCollectionName = (collectionId: string) => {
+    const collection = collections.find((c: any) => c.id === collectionId);
+    return collection ? collection.title : collectionId;
+  };
+
+  // Initialize modal with existing rules
+  useEffect(() => {
+    if (showCollectionModal) {
+      const existingCollectionIds = rules.map((rule: any) => rule.categoryId);
+      setSelectedCollections(existingCollectionIds);
+      
+      const existingPercentages: Record<string, number> = {};
+      rules.forEach((rule: any) => {
+        existingPercentages[rule.categoryId] = rule.percentOff;
+      });
+      setCollectionPercentages(existingPercentages);
+    }
+  }, [showCollectionModal, rules]);
+
+  // Handle form submission using Remix's useSubmit
+  const handleSubmit = () => {
+    if (!name || !targetKey || rules.length === 0) {
+      alert("Please fill in all required fields and add at least one rule.");
+      return;
+    }
+
+    // Validate percentages
+    const invalidRules = rules.filter((rule: any) => !rule.percentOff || rule.percentOff <= 0 || rule.percentOff > 100);
+    if (invalidRules.length > 0) {
+      alert("Please ensure all rules have valid percentages (1-100).");
+      return;
+    }
+
+    // Use Remix's useSubmit instead of manual form creation
+    const formData = new FormData();
+    formData.append("intent", "updatePlan");
+    formData.append("name", name);
+    formData.append("targetKey", targetKey);
+    formData.append("rules", JSON.stringify(rules));
+    
+    submit(formData, { method: "post" });
+  };
+
+  const handleCancel = () => {
+    // Reset form to original values
+    setName(plan.name);
+    setTargetKey(plan.targetKey);
+    setRules(plan.rules.map((rule: any) => ({
+      categoryId: rule.categoryId,
+      percentOff: rule.percentOff,
+    })));
+  };
+
+  const handleDelete = () => {
+    if (confirm("Are you sure you want to delete this discount plan? This action cannot be undone.")) {
+      const formData = new FormData();
+      formData.append("intent", "deletePlan");
+      submit(formData, { method: "post" });
+    }
+  };
+
+  const handleAddClick = () => {
+    setShowCollectionModal(true);
+  };
 
   const segmentOptions = segments.map((s: any) => ({ 
     label: s.name, 
     value: s.id 
   }));
 
-  const collectionOptions = collections.map((c: any) => ({
-    label: `${c.title} (${c.productsCount} products)`,
-    value: c.id,
-  }));
-
-  const selectedSegment = segments.find((s: any) => s.id === targetKey);
-  const selectedCollection = collections.find((c: any) => c.id === newCategoryId);
-
   return (
-    <Page 
-      title={`Edit Discount Plan: ${plan.name}`}
-      backAction={{ content: "Discount Plans", url: "/app/discount-plans" }}
-    >
-      <Layout>
-        <Layout.Section>
-          {actionData?.error && (
-            <Banner tone="critical">
-              {actionData.error}
-            </Banner>
-          )}
-          
-          {actionData?.success && (
-            <Banner tone="success">
-              {actionData.success}
-            </Banner>
-          )}
+    <>
+      <Page 
+        title={`Edit Discount Plan: ${plan.name}`}
+        backAction={{ content: "Discount Plans", url: "/app" }}
+      >
+        <Layout>
+          <Layout.Section>
+            {actionData?.error && (
+              <Banner tone="critical">
+                {actionData.error}
+              </Banner>
+            )}
+            
+            {actionData?.success && (
+              <Banner tone="success">
+                {actionData.success}
+              </Banner>
+            )}
 
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">Edit Plan Details</Text>
-              
-              <Form method="post">
-                <input type="hidden" name="intent" value="updatePlan" />
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Edit Plan Details</Text>
                 
                 <BlockStack gap="400">
                   <TextField
                     label="Plan Name"
                     value={name}
                     onChange={setName}
-                    name="name"
                     placeholder="e.g., VIP Discount"
                     autoComplete="off"
                   />
                   
                   <Select
-                    label="Target Type"
-                    options={[
-                      { label: "Segment", value: "segment" },
-                      { label: "Customer", value: "customer" },
-                    ]}
-                    value={targetType}
-                    onChange={setTargetType}
-                    name="targetType"
+                    label="Segment"
+                    options={segmentOptions}
+                    value={targetKey}
+                    onChange={setTargetKey}
+                    placeholder="Select a segment"
                   />
-                  
-                  {targetType === "segment" && (
-                    <Select
-                      label="Segment"
-                      options={segmentOptions}
-                      value={targetKey}
-                      onChange={setTargetKey}
-                      name="targetKey"
-                      placeholder="Select a segment"
-                    />
-                  )}
-                  
-                  {targetType === "customer" && (
-                    <TextField
-                      label="Customer ID"
-                      value={targetKey}
-                      onChange={setTargetKey}
-                      name="targetKey"
-                      placeholder="Enter customer ID"
-                      autoComplete="off"
-                    />
-                  )}
-                  
-                  <Button submit variant="primary">
-                    Update Plan
+                </BlockStack>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between">
+                  <Text as="h2" variant="headingMd">Rules</Text>
+                  <Button onClick={handleAddClick} variant="primary" size="slim">
+                    Select Collections
                   </Button>
-                </BlockStack>
-              </Form>
-            </BlockStack>
-          </Card>
+                </InlineStack>
+                
+                {rules.length === 0 ? (
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    No rules yet. Click "Select Collections" to add rules.
+                  </Text>
+                ) : (
+                  <BlockStack gap="300">
+                    {rules.map((rule: any, index: number) => {
+                      return (
+                        <Card key={index}>
+                          <BlockStack gap="300">
+                            <InlineStack align="space-between">
+                              <BlockStack gap="200">
+                                <Text as="h4" variant="headingSm">
+                                  {getCollectionName(rule.categoryId)}
+                                </Text>
+                                <Text as="p" variant="bodyMd">
+                                  {rule.percentOff}% off
+                                </Text>
+                              </BlockStack>
+                              <InlineStack gap="200">
+                                <Button 
+                                  onClick={() => {
+                                    const newRules = rules.filter((_: any, i: number) => i !== index);
+                                    setRules(newRules);
+                                  }}
+                                  variant="plain" 
+                                  tone="critical"
+                                  size="slim"
+                                >
+                                  Remove
+                                </Button>
+                              </InlineStack>
+                            </InlineStack>
+                          </BlockStack>
+                        </Card>
+                      );
+                    })}
+                  </BlockStack>
+                )}
+                
+                <InlineStack gap="300">
+                  <Button 
+                    onClick={handleSubmit} 
+                    variant="primary"
+                    loading={isUpdatingPlan}
+                    disabled={isUpdatingPlan || !name || !targetKey || rules.length === 0}
+                  >
+                    {isUpdatingPlan ? "Updating Plan..." : "Update Plan"}
+                  </Button>
+                  <Button onClick={handleCancel} variant="plain" disabled={isUpdatingPlan}>
+                    Cancel
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
 
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">Rules</Text>
-              
-              {plan.rules.length === 0 ? (
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  No rules yet. Add a rule below.
+            <Card>
+              <BlockStack gap="400">
+                <Button
+                  onClick={handleDelete}
+                  variant="plain"
+                  tone="critical"
+                  loading={isDeletingPlan}
+                  disabled={isDeletingPlan}
+                >
+                  {isDeletingPlan ? "Deleting..." : "Delete Plan"}
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+      
+      {/* Collection Selection Modal */}
+      <Modal
+        open={showCollectionModal}
+        onClose={() => setShowCollectionModal(false)}
+        title="Select Collections"
+        primaryAction={{
+          content: "Update Selected",
+          onAction: () => {
+            // Validate that all selected collections have percentages
+            const missingPercentages = selectedCollections.filter(id => 
+              !collectionPercentages[id] || collectionPercentages[id] <= 0
+            );
+            
+            if (missingPercentages.length > 0) {
+              alert("Please set a valid percentage (1-100) for all selected collections.");
+              return;
+            }
+
+            // Update rules with selected collections and their percentages
+            const newRules = selectedCollections.map(collectionId => ({
+              categoryId: collectionId,
+              percentOff: collectionPercentages[collectionId],
+            }));
+            
+            setRules(newRules);
+            setShowCollectionModal(false);
+            setSelectedCollections([]);
+            setCollectionSearch("");
+            setCollectionPercentages({});
+          },
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setShowCollectionModal(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <TextField
+              label="Search collections"
+              value={collectionSearch}
+              onChange={setCollectionSearch}
+              placeholder="Search by collection name..."
+              autoComplete="off"
+            />
+            
+            <ChoiceList
+              title="Collections"
+              choices={collections
+                .filter((collection: any) => 
+                  collection.title.toLowerCase().includes(collectionSearch.toLowerCase())
+                )
+                .map((collection: any) => ({
+                  label: collection.title,
+                  value: collection.id,
+                }))}
+              selected={selectedCollections}
+              onChange={setSelectedCollections}
+              allowMultiple
+            />
+            
+            {selectedCollections.length > 0 && (
+              <BlockStack gap="400">
+                <Text as="h4" variant="headingSm">
+                  Set Discount Percentages:
                 </Text>
-              ) : (
-                <BlockStack gap="300">
-                  {plan.rules.map((rule: any) => {
-                    const collection = collections.find((c: any) => c.id === rule.categoryId);
-                    return (
-                      <Card key={rule.id}>
-                        <BlockStack gap="300">
-                          <InlineStack align="space-between">
-                            <BlockStack gap="200">
-                              <Text as="h4" variant="headingSm">
-                                {collection?.title || rule.categoryId}
-                              </Text>
-                              <Text as="p" variant="bodyMd">
-                                {rule.percentOff}% off
-                              </Text>
-                            </BlockStack>
-                            <Form method="post">
-                              <input type="hidden" name="intent" value="deleteRule" />
-                              <input type="hidden" name="ruleId" value={rule.id} />
-                              <Button submit variant="plain" tone="critical">
-                                Delete Rule
-                              </Button>
-                            </Form>
-                          </InlineStack>
-                        </BlockStack>
-                      </Card>
-                    );
-                  })}
-                </BlockStack>
-              )}
-
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h3" variant="headingMd">Add New Rule</Text>
-                  
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="addRule" />
-                    
-                    <BlockStack gap="400">
-                      <Select
-                        label="Collection"
-                        options={collectionOptions}
-                        value={newCategoryId}
-                        onChange={setNewCategoryId}
-                        name="categoryId"
-                        placeholder="Select a collection"
-                      />
-                      
+                {selectedCollections.map(collectionId => {
+                  const collection = collections.find((c: any) => c.id === collectionId);
+                  return (
+                    <InlineStack key={collectionId} align="space-between" gap="400">
+                      <Text as="p" variant="bodyMd">
+                        {collection?.title}
+                      </Text>
                       <TextField
-                        label="Percent Off"
-                        value={newPercentOff}
-                        onChange={setNewPercentOff}
-                        name="percentOff"
+                        label=""
+                        type="number"
+                        value={collectionPercentages[collectionId] ? String(collectionPercentages[collectionId]) : ""}
+                        onChange={(value) => setCollectionPercentages(prev => ({
+                          ...prev,
+                          [collectionId]: parseFloat(value) || 0
+                        }))}
                         placeholder="0-100"
                         min="0"
                         max="100"
                         suffix="%"
                         autoComplete="off"
                       />
-                      
-                      {selectedCollection && (
-                        <Card>
-                          <BlockStack gap="200">
-                            <Text as="h4" variant="headingSm">
-                              Selected Collection
-                            </Text>
-                            <Text as="p" variant="bodyMd">
-                              {selectedCollection.title} ({selectedCollection.productsCount} products)
-                            </Text>
-                            {selectedCollection.description && (
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                {selectedCollection.description}
-                              </Text>
-                            )}
-                          </BlockStack>
-                        </Card>
-                      )}
-                      
-                      <Button submit variant="primary">
-                        Add Rule
-                      </Button>
-                    </BlockStack>
-                  </Form>
-                </BlockStack>
-              </Card>
-            </BlockStack>
-          </Card>
-
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">Danger Zone</Text>
-              
-              <Form method="post">
-                <input type="hidden" name="intent" value="deletePlan" />
-                <Button submit variant="plain" tone="critical">
-                  Delete Plan
-                </Button>
-              </Form>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+                    </InlineStack>
+                  );
+                })}
+              </BlockStack>
+            )}
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+    </>
   );
 }
  
