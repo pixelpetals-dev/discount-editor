@@ -268,7 +268,7 @@ export default function DiscountPlanEditPage() {
 
   const segmentOptions = segments.map((s: any) => ({ 
     label: s.name, 
-    value: s.id 
+    value: s.name // Use segment name instead of ID for targetKey
   }));
 
   // Filter and paginate collections

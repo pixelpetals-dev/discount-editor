@@ -60,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       
       // Fetch segments
       console.log("Fetching segments...");
+      console.log("Fetching segments...");
       const segmentsResponse = await admin.graphql(`#graphql
         query getSegments($first: Int!) {
           segments(first: $first) {
@@ -518,9 +519,9 @@ export default function DiscountPlansPage() {
                     <Text as="p" variant="bodyMd" tone="subdued">
                       No discount plans created yet
                     </Text>
-                    <Button onClick={handleAddClick} variant="primary">
+                    {/* <Button onClick={handleAddClick} variant="primary">
                       Create Your First Plan
-                    </Button>
+                    </Button> */}
                   </BlockStack>
                 </Card>
               ) : (

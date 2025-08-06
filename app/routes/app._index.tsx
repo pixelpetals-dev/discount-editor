@@ -190,7 +190,7 @@ export default function Index() {
   // Create options for segments and collections
   const segmentOptions = segments.map((segment: any) => ({
     label: segment.name,
-    value: segment.id,
+    value: segment.name, // Use segment name instead of ID for targetKey
   }));
 
   const collectionOptions = collections.map((collection: any) => ({
@@ -222,7 +222,9 @@ export default function Index() {
 
   // Helper function to get segment name from target key
   const getSegmentName = (targetKey: string) => {
-    const segment = segments.find((s: any) => s.id === targetKey);
+    // Since we now use segment names as targetKey, just return the targetKey
+    // or find the segment by name if needed
+    const segment = segments.find((s: any) => s.name === targetKey);
     return segment ? segment.name : targetKey;
   };
 
