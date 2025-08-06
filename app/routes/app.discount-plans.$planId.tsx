@@ -509,7 +509,7 @@ export default function DiscountPlanEditPage() {
         bottom: '20px',
         right: '20px',
         zIndex: 1000,
-        backgroundColor: 'transparent',
+      
         padding: '8px 12px',
         borderRadius: '6px',
         fontSize: '12px',

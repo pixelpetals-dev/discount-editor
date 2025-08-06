@@ -202,6 +202,9 @@ export default function Index() {
   const currentAction = navigation.formData?.get("action") as string;
   const currentPlanId = navigation.formData?.get("planId") as string;
   
+  // Also check if we're in a create submission
+  const isCreateSubmission = navigation.formData?.get("action") === "create";
+  
   // Determine loading states
   const isCreatingPlan = currentAction === "create" && navigation.state === "submitting";
   const isDeletingPlan = currentAction === "delete" && navigation.state === "submitting";
@@ -219,6 +222,7 @@ export default function Index() {
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
   const [collectionPercentages, setCollectionPercentages] = useState<{[key: string]: number}>({});
   const [validationError, setValidationError] = useState("");
+  const [collectionsToShow, setCollectionsToShow] = useState(5); // Pagination state
 
   // Helper function to get segment name from target key
   const getSegmentName = (targetKey: string) => {
@@ -236,21 +240,27 @@ export default function Index() {
 
   // Show success message when action data contains success
   useEffect(() => {
-    if (success) {
-      setShowSuccess(true);
-      // Close form immediately after successful plan creation
-      if (currentAction === "create") {
+    // Close form when navigation becomes idle after a create submission
+    if (navigation.state === "idle" && (currentAction === "create" || isCreateSubmission)) {
+      if (actionData && 'success' in actionData) {
+        setShowSuccess(true);
         handleCancel();
+        // Auto-hide success message after 3 seconds
+        const timer = setTimeout(() => {
+          setShowSuccess(false);
+        }, 3000);
+        return () => clearTimeout(timer);
       }
-      // Auto-hide success message after 3 seconds
-      const timer = setTimeout(() => {
-        setShowSuccess(false);
-      }, 3000);
-      return () => clearTimeout(timer);
     }
-  }, [success, currentAction]);
+  }, [actionData, currentAction, navigation.state, isCreateSubmission]);
 
   const handleAddClick = () => setShowForm(true);
+  
+  // Reset pagination when modal opens
+  const handleOpenCollectionModal = () => {
+    setShowCollectionModal(true);
+    setCollectionsToShow(5); // Reset pagination
+  };
   const handleCancel = () => {
     setShowForm(false);
     setName("");
@@ -303,6 +313,7 @@ export default function Index() {
       },
       { method: "POST" }
     );
+    
   };
 
   const handleDelete = (planId: string) => {
@@ -322,14 +333,22 @@ export default function Index() {
     collection.title.toLowerCase().includes(collectionSearch.toLowerCase())
   );
 
+  // Paginate collections
+  const displayedCollections = filteredCollections.slice(0, collectionsToShow);
+  const hasMoreCollections = displayedCollections.length < filteredCollections.length;
+
+  const handleLoadMore = () => {
+    setCollectionsToShow(prev => prev + 5);
+  };
+
   return (
     <>
       <Page title="Discount Plans">
         <Layout>
           <Layout.Section>
-            {showSuccess && (
+            {showSuccess && actionData && 'success' in actionData && (
               <Banner tone="success" onDismiss={() => setShowSuccess(false)}>
-                {success}
+                {actionData.success}
               </Banner>
             )}
             
@@ -441,7 +460,7 @@ export default function Index() {
                       */}
                       
                       <Button
-                        onClick={() => setShowCollectionModal(true)}
+                        onClick={handleOpenCollectionModal}
                         disabled={isCreatingPlan}
                       >
                         {rules.length > 0 
@@ -622,18 +641,24 @@ export default function Index() {
             
             <ChoiceList
               title="Collections"
-              choices={collections
-                .filter((collection: any) => 
-                  collection.title.toLowerCase().includes(collectionSearch.toLowerCase())
-                )
-                .map((collection: any) => ({
-                  label: collection.title,
-                  value: collection.id,
-                }))}
+              choices={displayedCollections.map((collection: any) => ({
+                label: collection.title,
+                value: collection.id,
+              }))}
               selected={selectedCollections}
               onChange={setSelectedCollections}
               allowMultiple
             />
+            
+            {hasMoreCollections && (
+              <Button
+                onClick={handleLoadMore}
+                variant="plain"
+                size="slim"
+              >
+                Load More Collections
+              </Button>
+            )}
             
             {selectedCollections.length > 0 && (
               <BlockStack gap="400">
@@ -671,7 +696,16 @@ export default function Index() {
       </Modal>
       
       {/* Footer */}
-      
+      <div style={{
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        zIndex: 1000,
+        padding: '8px 12px',
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: '#6d7175'
+      }}>
         <Link 
           to="https://pixelpetals.com" 
           target="_blank" 
@@ -684,6 +718,7 @@ export default function Index() {
         >
           Developed by Pixel Petals
         </Link>
+      </div>
      
     </>
   );
